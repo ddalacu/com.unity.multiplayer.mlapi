@@ -1,328 +1,288 @@
-﻿using System;
-using System.Linq;
-using System.Collections.Generic;
+using System;
 using UnityEngine;
 using UnityEngine.LowLevel;
 using UnityEngine.PlayerLoop;
+using System.Collections.Generic;
 
-namespace MLAPI
+
+public interface INetworkUpdateSystem
 {
-    /// <summary>
-    /// Defines the required interface of a network update system being executed by the network update loop.
-    /// </summary>
-    public interface INetworkUpdateSystem
-    {
-        void NetworkUpdate(NetworkUpdateStage updateStage);
-    }
+    void NetworkUpdate(NetworkUpdateStage updateStage);
+}
+
+public enum NetworkUpdateStage : byte
+{
+    Initialization = 1,
+    EarlyUpdate = 2,
+    FixedUpdate = 3,
+    PreUpdate = 4,
+    Update = 0,
+    PreLateUpdate = 5,
+    PostLateUpdate = 6,
+    Unknown = 255//used when not inside <see cref="INetworkUpdateSystem.NetworkUpdate"/>
+}
+
+
+public static class NetworkUpdateLoop
+{
+    private static List<INetworkUpdateSystem>[] Stages;
+
+    private static List<uint>[] IDs;
+
+    private static List<UpdateHandles>[] Handles;
+
+
+    public static uint[] IDCounters;
+
+
+    public const int StageCount = 7;
 
     /// <summary>
-    /// Defines network update stages being executed by the network update loop.
+    /// Current active stage, have a valid value only when accessed from <see cref="INetworkUpdateSystem.NetworkUpdate"/>
     /// </summary>
-    public enum NetworkUpdateStage : byte
-    {
-        Initialization = 1,
-        EarlyUpdate = 2,
-        FixedUpdate = 3,
-        PreUpdate = 4,
-        Update = 0, // Default
-        PreLateUpdate = 5,
-        PostLateUpdate = 6
-    }
+    public static NetworkUpdateStage UpdateStage { get; private set; }
 
-    /// <summary>
-    /// Represents the network update loop injected into low-level player loop in Unity.
-    /// </summary>
-    public static class NetworkUpdateLoop
+    [RuntimeInitializeOnLoadMethod]
+    private static void Initialize()
     {
-        [RuntimeInitializeOnLoadMethod]
-        private static void Initialize()
+        IDCounters = new uint[StageCount];
+        IDs = new List<uint>[StageCount];
+        Stages = new List<INetworkUpdateSystem>[StageCount];
+        Handles = new List<UpdateHandles>[StageCount];
+
+        for (var i = 0; i < StageCount; i++)
         {
-            var customPlayerLoop = PlayerLoop.GetCurrentPlayerLoop();
+            Stages[i] = new List<INetworkUpdateSystem>(64);
+            IDs[i] = new List<uint>(64);
+            Handles[i] = new List<UpdateHandles>(64);
+        }
 
-            for (int i = 0; i < customPlayerLoop.subSystemList.Length; i++)
-            {
-                var playerLoopSystem = customPlayerLoop.subSystemList[i];
-
-                if (playerLoopSystem.type == typeof(Initialization))
-                {
-                    var subsystems = playerLoopSystem.subSystemList.ToList();
-                    {
-                        // insert at the bottom of `Initialization`
-                        subsystems.Add(NetworkInitialization.CreateLoopSystem());
-                    }
-                    playerLoopSystem.subSystemList = subsystems.ToArray();
-                }
-                else if (playerLoopSystem.type == typeof(EarlyUpdate))
-                {
-                    var subsystems = playerLoopSystem.subSystemList.ToList();
-                    {
-                        int indexOfScriptRunDelayedStartupFrame = subsystems.FindIndex(s => s.type == typeof(EarlyUpdate.ScriptRunDelayedStartupFrame));
-                        if (indexOfScriptRunDelayedStartupFrame < 0)
-                        {
-                            Debug.LogError($"{nameof(NetworkUpdateLoop)}.{nameof(Initialize)}: Cannot find index of `{nameof(EarlyUpdate.ScriptRunDelayedStartupFrame)}` loop system in `{nameof(EarlyUpdate)}`'s subsystem list!");
-                            return;
-                        }
-
-                        // insert before `EarlyUpdate.ScriptRunDelayedStartupFrame`
-                        subsystems.Insert(indexOfScriptRunDelayedStartupFrame, NetworkEarlyUpdate.CreateLoopSystem());
-                    }
-                    playerLoopSystem.subSystemList = subsystems.ToArray();
-                }
-                else if (playerLoopSystem.type == typeof(FixedUpdate))
-                {
-                    var subsystems = playerLoopSystem.subSystemList.ToList();
-                    {
-                        int indexOfScriptRunBehaviourFixedUpdate = subsystems.FindIndex(s => s.type == typeof(FixedUpdate.ScriptRunBehaviourFixedUpdate));
-                        if (indexOfScriptRunBehaviourFixedUpdate < 0)
-                        {
-                            Debug.LogError($"{nameof(NetworkUpdateLoop)}.{nameof(Initialize)}: Cannot find index of `{nameof(FixedUpdate.ScriptRunBehaviourFixedUpdate)}` loop system in `{nameof(FixedUpdate)}`'s subsystem list!");
-                            return;
-                        }
-
-                        // insert before `FixedUpdate.ScriptRunBehaviourFixedUpdate`
-                        subsystems.Insert(indexOfScriptRunBehaviourFixedUpdate, NetworkFixedUpdate.CreateLoopSystem());
-                    }
-                    playerLoopSystem.subSystemList = subsystems.ToArray();
-                }
-                else if (playerLoopSystem.type == typeof(PreUpdate))
-                {
-                    var subsystems = playerLoopSystem.subSystemList.ToList();
-                    {
-                        int indexOfPhysicsUpdate = subsystems.FindIndex(s => s.type == typeof(PreUpdate.PhysicsUpdate));
-                        if (indexOfPhysicsUpdate < 0)
-                        {
-                            Debug.LogError($"{nameof(NetworkUpdateLoop)}.{nameof(Initialize)}: Cannot find index of `{nameof(PreUpdate.PhysicsUpdate)}` loop system in `{nameof(PreUpdate)}`'s subsystem list!");
-                            return;
-                        }
-
-                        // insert before `PreUpdate.PhysicsUpdate`
-                        subsystems.Insert(indexOfPhysicsUpdate, NetworkPreUpdate.CreateLoopSystem());
-                    }
-                    playerLoopSystem.subSystemList = subsystems.ToArray();
-                }
-                else if (playerLoopSystem.type == typeof(Update))
-                {
-                    var subsystems = playerLoopSystem.subSystemList.ToList();
-                    {
-                        int indexOfScriptRunBehaviourUpdate = subsystems.FindIndex(s => s.type == typeof(Update.ScriptRunBehaviourUpdate));
-                        if (indexOfScriptRunBehaviourUpdate < 0)
-                        {
-                            Debug.LogError($"{nameof(NetworkUpdateLoop)}.{nameof(Initialize)}: Cannot find index of `{nameof(Update.ScriptRunBehaviourUpdate)}` loop system in `{nameof(Update)}`'s subsystem list!");
-                            return;
-                        }
-
-                        // insert before `Update.ScriptRunBehaviourUpdate`
-                        subsystems.Insert(indexOfScriptRunBehaviourUpdate, NetworkUpdate.CreateLoopSystem());
-                    }
-                    playerLoopSystem.subSystemList = subsystems.ToArray();
-                }
-                else if (playerLoopSystem.type == typeof(PreLateUpdate))
-                {
-                    var subsystems = playerLoopSystem.subSystemList.ToList();
-                    {
-                        int indexOfScriptRunBehaviourLateUpdate = subsystems.FindIndex(s => s.type == typeof(PreLateUpdate.ScriptRunBehaviourLateUpdate));
-                        if (indexOfScriptRunBehaviourLateUpdate < 0)
-                        {
-                            Debug.LogError($"{nameof(NetworkUpdateLoop)}.{nameof(Initialize)}: Cannot find index of `{nameof(PreLateUpdate.ScriptRunBehaviourLateUpdate)}` loop system in `{nameof(PreLateUpdate)}`'s subsystem list!");
-                            return;
-                        }
-
-                        // insert before `PreLateUpdate.ScriptRunBehaviourLateUpdate`
-                        subsystems.Insert(indexOfScriptRunBehaviourLateUpdate, NetworkPreLateUpdate.CreateLoopSystem());
-                    }
-                    playerLoopSystem.subSystemList = subsystems.ToArray();
-                }
-                else if (playerLoopSystem.type == typeof(PostLateUpdate))
-                {
-                    var subsystems = playerLoopSystem.subSystemList.ToList();
-                    {
-                        int indexOfPlayerSendFrameComplete = subsystems.FindIndex(s => s.type == typeof(PostLateUpdate.PlayerSendFrameComplete));
-                        if (indexOfPlayerSendFrameComplete < 0)
-                        {
-                            Debug.LogError($"{nameof(NetworkUpdateLoop)}.{nameof(Initialize)}: Cannot find index of `{nameof(PostLateUpdate.PlayerSendFrameComplete)}` loop system in `{nameof(PostLateUpdate)}`'s subsystem list!");
-                            return;
-                        }
-
-                        // insert after `PostLateUpdate.PlayerSendFrameComplete`
-                        subsystems.Insert(indexOfPlayerSendFrameComplete + 1, NetworkPostLateUpdate.CreateLoopSystem());
-                    }
-                    playerLoopSystem.subSystemList = subsystems.ToArray();
-                }
-
-                customPlayerLoop.subSystemList[i] = playerLoopSystem;
-            }
-
+        var customPlayerLoop = PlayerLoop.GetCurrentPlayerLoop();
+        if (ConstructedPlayerLoopEdit.Apply(GetDefaultEdits(), ref customPlayerLoop))
             PlayerLoop.SetPlayerLoop(customPlayerLoop);
+    }
+
+    public class UpdateHandles : IDisposable
+    {
+        private readonly INetworkUpdateSystem _system;
+
+        private readonly uint[] _identifiers;
+
+        public UpdateHandles(INetworkUpdateSystem system)
+        {
+            _system = system;
+            _identifiers = new uint[StageCount];
         }
 
-        /// <summary>
-        /// The current network update stage being executed.
-        /// </summary>
-        public static NetworkUpdateStage UpdateStage;
 
-        /// <summary>
-        /// Registers a network update system to be executed in all network update stages.
-        /// </summary>
-        public static void RegisterAllNetworkUpdates(this INetworkUpdateSystem updateSystem)
+        public void RegisterAll()
         {
-            foreach (NetworkUpdateStage updateStage in Enum.GetValues(typeof(NetworkUpdateStage)))
-            {
-                RegisterNetworkUpdate(updateSystem, updateStage);
-            }
+            for (var index = 0; index < StageCount; index++)
+                Register((NetworkUpdateStage)index);
         }
 
-        /// <summary>
-        /// Registers a network update system to be executed in a specific network update stage.
-        /// </summary>
-        public static void RegisterNetworkUpdate(this INetworkUpdateSystem updateSystem, NetworkUpdateStage updateStage = NetworkUpdateStage.Update)
+        public void UnregisterAll()
         {
-            int updateStageIndex = (int)updateStage;
-            if (!m_UpdateSystem_Sets[updateStageIndex].Contains(updateSystem))
-            {
-                m_UpdateSystem_Sets[updateStageIndex].Add(updateSystem);
-                m_UpdateSystem_Arrays[updateStageIndex] = m_UpdateSystem_Sets[updateStageIndex].ToArray();
-            }
+            for (var index = 0; index < StageCount; index++)
+                Unregister((NetworkUpdateStage)index);
         }
 
-        /// <summary>
-        /// Unregisters a network update system from all network update stages.
-        /// </summary>
-        public static void UnregisterAllNetworkUpdates(this INetworkUpdateSystem updateSystem)
+        public bool Register(NetworkUpdateStage updateStage = NetworkUpdateStage.Update)
         {
-            foreach (NetworkUpdateStage updateStage in Enum.GetValues(typeof(NetworkUpdateStage)))
-            {
-                UnregisterNetworkUpdate(updateSystem, updateStage);
-            }
+            if (_identifiers[(int)updateStage] != 0)
+                return false;
+
+            var index = (int)updateStage;
+
+            IDCounters[index]++;
+            _identifiers[(int)updateStage] = IDCounters[(int)updateStage];
+
+            Stages[index].Add(_system);
+            IDs[index].Add(_identifiers[(int)updateStage]);
+            Handles[index].Add(this);
+
+            return true;
         }
 
-        /// <summary>
-        /// Unregisters a network update system from a specific network update stage.
-        /// </summary>
-        public static void UnregisterNetworkUpdate(this INetworkUpdateSystem updateSystem, NetworkUpdateStage updateStage = NetworkUpdateStage.Update)
+        public static int BinarySearch(List<uint> list, uint key)
         {
-            int updateStageIndex = (int)updateStage;
-            if (m_UpdateSystem_Sets[updateStageIndex].Contains(updateSystem))
+            int min = 0;
+            int max = list.Count - 1;
+            while (min <= max)
             {
-                m_UpdateSystem_Sets[updateStageIndex].Remove(updateSystem);
-                m_UpdateSystem_Arrays[updateStageIndex] = m_UpdateSystem_Sets[updateStageIndex].ToArray();
-            }
-        }
-
-        private static readonly HashSet<INetworkUpdateSystem>[] m_UpdateSystem_Sets =
-        {
-            new HashSet<INetworkUpdateSystem>(), // 0: Update
-            new HashSet<INetworkUpdateSystem>(), // 1: Initialization
-            new HashSet<INetworkUpdateSystem>(), // 2: EarlyUpdate
-            new HashSet<INetworkUpdateSystem>(), // 3: FixedUpdate
-            new HashSet<INetworkUpdateSystem>(), // 4: PreUpdate
-            new HashSet<INetworkUpdateSystem>(), // 5: PreLateUpdate
-            new HashSet<INetworkUpdateSystem>(), // 6: PostLateUpdate
-        };
-
-        private static readonly INetworkUpdateSystem[][] m_UpdateSystem_Arrays =
-        {
-            new INetworkUpdateSystem[0], // 0: Update
-            new INetworkUpdateSystem[0], // 1: Initialization
-            new INetworkUpdateSystem[0], // 2: EarlyUpdate
-            new INetworkUpdateSystem[0], // 3: FixedUpdate
-            new INetworkUpdateSystem[0], // 4: PreUpdate
-            new INetworkUpdateSystem[0], // 5: PreLateUpdate
-            new INetworkUpdateSystem[0], // 6: PostLateUpdate
-        };
-
-        private static void RunNetworkUpdateStage(NetworkUpdateStage updateStage)
-        {
-            UpdateStage = updateStage;
-            int updateStageIndex = (int)updateStage;
-            int arrayLength = m_UpdateSystem_Arrays[updateStageIndex].Length;
-            for (int i = 0; i < arrayLength; i++)
-            {
-                m_UpdateSystem_Arrays[updateStageIndex][i].NetworkUpdate(updateStage);
-            }
-        }
-
-        private struct NetworkInitialization
-        {
-            public static PlayerLoopSystem CreateLoopSystem()
-            {
-                return new PlayerLoopSystem
+                int mid = (min + max) / 2;
+                if (key == list[mid])
                 {
-                    type = typeof(NetworkInitialization),
-                    updateDelegate = () => RunNetworkUpdateStage(NetworkUpdateStage.Initialization)
-                };
+                    return mid;
+                }
+
+                if (key < list[mid])
+                    max = mid - 1;
+                else
+                    min = mid + 1;
             }
+
+            throw new Exception("Id not found");
         }
 
-        private struct NetworkEarlyUpdate
+        public bool Unregister(NetworkUpdateStage updateStage = NetworkUpdateStage.Update)
         {
-            public static PlayerLoopSystem CreateLoopSystem()
-            {
-                return new PlayerLoopSystem
-                {
-                    type = typeof(NetworkEarlyUpdate),
-                    updateDelegate = () => RunNetworkUpdateStage(NetworkUpdateStage.EarlyUpdate)
-                };
-            }
+            var identifier = _identifiers[(int)updateStage];
+            if (identifier == 0)
+                return false;
+
+            var index = (int)updateStage;
+
+            var idsList = IDs[index];
+            var handleList = Handles[index];
+            var stageList = Stages[index];
+
+            var mid = BinarySearch(idsList, identifier);
+
+            var lastHandle = handleList[handleList.Count - 1];
+
+            lastHandle._identifiers[index] = _identifiers[index];
+
+            handleList[mid] = lastHandle;
+            stageList[mid] = stageList[stageList.Count - 1];
+
+            handleList.RemoveAt(handleList.Count - 1);
+            idsList.RemoveAt(idsList.Count - 1);
+            stageList.RemoveAt(stageList.Count - 1);
+
+            _identifiers[index] = 0;
+
+            return true;
         }
 
-        private struct NetworkFixedUpdate
+        public void Dispose()
         {
-            public static PlayerLoopSystem CreateLoopSystem()
-            {
-                return new PlayerLoopSystem
-                {
-                    type = typeof(NetworkFixedUpdate),
-                    updateDelegate = () => RunNetworkUpdateStage(NetworkUpdateStage.FixedUpdate)
-                };
-            }
-        }
-
-        private struct NetworkPreUpdate
-        {
-            public static PlayerLoopSystem CreateLoopSystem()
-            {
-                return new PlayerLoopSystem
-                {
-                    type = typeof(NetworkPreUpdate),
-                    updateDelegate = () => RunNetworkUpdateStage(NetworkUpdateStage.PreUpdate)
-                };
-            }
-        }
-
-        private struct NetworkUpdate
-        {
-            public static PlayerLoopSystem CreateLoopSystem()
-            {
-                return new PlayerLoopSystem
-                {
-                    type = typeof(NetworkUpdate),
-                    updateDelegate = () => RunNetworkUpdateStage(NetworkUpdateStage.Update)
-                };
-            }
-        }
-
-        private struct NetworkPreLateUpdate
-        {
-            public static PlayerLoopSystem CreateLoopSystem()
-            {
-                return new PlayerLoopSystem
-                {
-                    type = typeof(NetworkPreLateUpdate),
-                    updateDelegate = () => RunNetworkUpdateStage(NetworkUpdateStage.PreLateUpdate)
-                };
-            }
-        }
-
-        private struct NetworkPostLateUpdate
-        {
-            public static PlayerLoopSystem CreateLoopSystem()
-            {
-                return new PlayerLoopSystem
-                {
-                    type = typeof(NetworkPostLateUpdate),
-                    updateDelegate = () => RunNetworkUpdateStage(NetworkUpdateStage.PostLateUpdate)
-                };
-            }
+            UnregisterAll();
         }
     }
+
+    public static UpdateHandles CreateUpdateHandles(this INetworkUpdateSystem system)
+    {
+        return new UpdateHandles(system);
+    }
+
+    private static IEnumerable<ConstructedPlayerLoopEdit> GetDefaultEdits()
+    {
+        var builders = new[]
+        {
+            NetworkInitialization.CreateEdit(),
+            NetworkEarlyUpdate.CreateEdit(),
+            NetworkFixedUpdate.CreateEdit(),
+            NetworkPreUpdate.CreateEdit(),
+            NetworkUpdate.CreateEdit(),
+            NetworkPreLateUpdate.CreateEdit(),
+            NetworkPostLateUpdate.CreateEdit()
+        };
+
+        return builders;
+    }
+
+    public struct NetworkInitialization
+    {
+        public static ConstructedPlayerLoopEdit CreateEdit()
+        {
+            return new PlayerLoopEdit()
+                .Enter<Initialization>()
+                .Add<NetworkInitialization>(() =>
+                {
+                    RunStage(NetworkUpdateStage.Initialization);
+                });
+        }
+    }
+
+    public struct NetworkEarlyUpdate
+    {
+        public static ConstructedPlayerLoopEdit CreateEdit()
+        {
+            return new PlayerLoopEdit()
+                .Enter<EarlyUpdate>()
+                .InsertBefore<EarlyUpdate.ScriptRunDelayedStartupFrame, NetworkEarlyUpdate>(() =>
+                {
+                    RunStage(NetworkUpdateStage.EarlyUpdate);
+                });
+        }
+    }
+
+    public struct NetworkFixedUpdate
+    {
+        public static ConstructedPlayerLoopEdit CreateEdit()
+        {
+            return new PlayerLoopEdit()
+                .Enter<FixedUpdate>()
+                .InsertBefore<FixedUpdate.ScriptRunBehaviourFixedUpdate, NetworkFixedUpdate>(() =>
+                {
+                    RunStage(NetworkUpdateStage.FixedUpdate);
+                });
+        }
+    }
+
+    public struct NetworkPreUpdate
+    {
+        public static ConstructedPlayerLoopEdit CreateEdit()
+        {
+            return new PlayerLoopEdit()
+                .Enter<PreUpdate>()
+                .InsertBefore<PreUpdate.PhysicsUpdate, NetworkPreUpdate>(() =>
+                {
+                    RunStage(NetworkUpdateStage.PreUpdate);
+                });
+        }
+    }
+
+    public struct NetworkUpdate
+    {
+        public static ConstructedPlayerLoopEdit CreateEdit()
+        {
+            return new PlayerLoopEdit()
+                .Enter<Update>()
+                .InsertBefore<Update.ScriptRunBehaviourUpdate, NetworkUpdate>(() =>
+                {
+                    RunStage(NetworkUpdateStage.Update);
+                });
+        }
+    }
+
+    public struct NetworkPreLateUpdate
+    {
+        public static ConstructedPlayerLoopEdit CreateEdit()
+        {
+            return new PlayerLoopEdit()
+                .Enter<PreLateUpdate>()
+                .InsertBefore<PreLateUpdate.ScriptRunBehaviourLateUpdate, NetworkPreLateUpdate>(() =>
+                {
+                    RunStage(NetworkUpdateStage.PreLateUpdate);
+                });
+        }
+    }
+
+    public struct NetworkPostLateUpdate
+    {
+        public static ConstructedPlayerLoopEdit CreateEdit()
+        {
+            return new PlayerLoopEdit()
+                .Enter<PostLateUpdate>()
+                .InsertAfter<PostLateUpdate.PlayerSendFrameComplete, NetworkPostLateUpdate>(() =>
+                {
+                    RunStage(NetworkUpdateStage.PostLateUpdate);
+                });
+        }
+    }
+
+    private static void RunStage(NetworkUpdateStage stage)
+    {
+        UpdateStage = stage;
+
+        var array = Stages[(byte)stage];
+        var arrayLength = array.Count;
+        for (var i = 0; i < arrayLength; i++)
+            array[i].NetworkUpdate(stage);
+
+        UpdateStage = NetworkUpdateStage.Unknown;
+    }
+
 }

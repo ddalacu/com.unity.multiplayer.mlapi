@@ -78,6 +78,10 @@ namespace MLAPI
         public float NetworkTime => Time.unscaledTime + currentNetworkTimeOffset;
         private float networkTimeOffset;
         private float currentNetworkTimeOffset;
+
+
+        private NetworkUpdateLoop.UpdateHandles _updateHandles;
+
         /// <summary>
         /// Gets or sets if the NetworkingManager should be marked as DontDestroyOnLoad
         /// </summary>
@@ -651,8 +655,9 @@ namespace MLAPI
             }
 
             // Register INetworkUpdateSystem
-            this.RegisterNetworkUpdate(NetworkUpdateStage.EarlyUpdate);
-            this.RegisterNetworkUpdate(NetworkUpdateStage.PreUpdate);
+            _updateHandles = this.CreateUpdateHandles();
+            _updateHandles.Register(NetworkUpdateStage.EarlyUpdate);
+            _updateHandles.Register(NetworkUpdateStage.PreUpdate);
 
             SetSingleton();
             if (DontDestroy)
@@ -664,7 +669,7 @@ namespace MLAPI
         private void OnDisable()
         {
             // Unregister INetworkUpdateSystem
-            this.UnregisterAllNetworkUpdates();
+            _updateHandles.UnregisterAll();
         }
 
         private void OnDestroy()
@@ -1416,6 +1421,7 @@ namespace MLAPI
         }
 
         private readonly List<NetworkedObject> _observedObjects = new List<NetworkedObject>();
+
 
         internal void HandleApproval(ulong clientId, bool createPlayerObject, ulong? playerPrefabHash, bool approved, Vector3? position, Quaternion? rotation)
         {

@@ -1,38 +1,46 @@
-﻿using MLAPI;
+using System;
+using MLAPI;
 using UnityEngine;
 
 public class NetLoopComp : MonoBehaviour, INetworkUpdateSystem
 {
+    private NetworkUpdateLoop.UpdateHandles _updateHandles;
+
+    private void Awake()
+    {
+        _updateHandles = this.CreateUpdateHandles();
+    }
+
+    public void UnregisterUpdates()
+    {
+        _updateHandles.UnregisterAll();
+    }
+
     public void RegisterUpdates(int id)
     {
         switch (id % 5)
         {
             case 0:
-                this.RegisterAllNetworkUpdates();
+                _updateHandles.RegisterAll();
                 break;
             case 1:
-                this.RegisterNetworkUpdate(NetworkUpdateStage.FixedUpdate);
-                this.RegisterNetworkUpdate(NetworkUpdateStage.Update);
-                this.RegisterNetworkUpdate(NetworkUpdateStage.PreLateUpdate);
+                _updateHandles.Register(NetworkUpdateStage.FixedUpdate);
+                _updateHandles.Register(NetworkUpdateStage.Update);
+                _updateHandles.Register(NetworkUpdateStage.PreLateUpdate);
                 break;
             case 2:
-                this.RegisterNetworkUpdate(NetworkUpdateStage.EarlyUpdate);
-                this.RegisterNetworkUpdate(NetworkUpdateStage.PreUpdate);
-                this.RegisterNetworkUpdate(NetworkUpdateStage.PostLateUpdate);
+                _updateHandles.Register(NetworkUpdateStage.EarlyUpdate);
+                _updateHandles.Register(NetworkUpdateStage.PreUpdate);
+                _updateHandles.Register(NetworkUpdateStage.PostLateUpdate);
                 break;
             case 3:
-                this.RegisterNetworkUpdate(NetworkUpdateStage.Initialization);
-                this.RegisterNetworkUpdate(NetworkUpdateStage.FixedUpdate);
+                _updateHandles.Register(NetworkUpdateStage.Initialization);
+                _updateHandles.Register(NetworkUpdateStage.FixedUpdate);
                 break;
             case 4:
-                this.RegisterNetworkUpdate();
+                _updateHandles.Register();
                 break;
         }
-    }
-
-    public void UnregisterUpdates()
-    {
-        this.UnregisterAllNetworkUpdates();
     }
 
     private void OnDestroy()

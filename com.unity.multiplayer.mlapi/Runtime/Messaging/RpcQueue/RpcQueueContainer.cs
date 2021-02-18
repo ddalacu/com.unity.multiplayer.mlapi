@@ -45,6 +45,8 @@ namespace MLAPI.Messaging
         private bool m_IsTestingEnabled;
         private bool m_ProcessUpdateStagesExternally;
         private bool m_IsNotUsingBatching;
+        private NetworkUpdateLoop.UpdateHandles _updateHandles;
+
 
         public bool IsUsingBatching()
         {
@@ -110,15 +112,15 @@ namespace MLAPI.Messaging
             switch (queueType)
             {
                 case RpcQueueProcessingTypes.Receive:
-                {
-                    m_RpcQueueProcessor.ProcessReceiveQueue(currentUpdateStage);
-                    break;
-                }
+                    {
+                        m_RpcQueueProcessor.ProcessReceiveQueue(currentUpdateStage);
+                        break;
+                    }
                 case RpcQueueProcessingTypes.Send:
-                {
-                    m_RpcQueueProcessor.ProcessSendQueue();
-                    break;
-                }
+                    {
+                        m_RpcQueueProcessor.ProcessSendQueue();
+                        break;
+                    }
             }
         }
 
@@ -310,7 +312,7 @@ namespace MLAPI.Messaging
         public void SetLoopBackFrameItem(NetworkUpdateStage updateStage)
         {
             //Get the next frame's inbound queue history frame
-            QueueHistoryFrame loopbackHistoryframe =  GetQueueHistoryFrame(QueueHistoryFrame.QueueFrameType.Inbound,updateStage,true);
+            QueueHistoryFrame loopbackHistoryframe = GetQueueHistoryFrame(QueueHistoryFrame.QueueFrameType.Inbound, updateStage, true);
 
             //Get the current frame's outbound queue history frame
             QueueHistoryFrame queueHistoryItem = GetQueueHistoryFrame(QueueHistoryFrame.QueueFrameType.Outbound, NetworkUpdateStage.PostLateUpdate, false);
@@ -444,7 +446,7 @@ namespace MLAPI.Messaging
             //Sanity check
             if (pbWriter != queueHistoryItem.queueWriter && !getNextFrame)
             {
-                UnityEngine.Debug.LogError("RpcQueueContainer " + queueFrameType.ToString() + " passed writer is not the same as the current PooledBitWriter for the " +  queueFrameType.ToString() + "]!");
+                UnityEngine.Debug.LogError("RpcQueueContainer " + queueFrameType.ToString() + " passed writer is not the same as the current PooledBitWriter for the " + queueFrameType.ToString() + "]!");
             }
 
             //The total size of the frame is the last known position of the stream
@@ -500,7 +502,7 @@ namespace MLAPI.Messaging
                     }
 
                     //Write RPC data
-                    loopBackHistoryFrame.queueWriter.WriteBytes(queueHistoryItem.queueStream.GetBuffer(), MSGSize,(int)queueHistoryItem.queueStream.Position);
+                    loopBackHistoryFrame.queueWriter.WriteBytes(queueHistoryItem.queueStream.GetBuffer(), MSGSize, (int)queueHistoryItem.queueStream.Position);
 
                     //Set the total size for this stream
                     loopBackHistoryFrame.totalSize = (uint)loopBackHistoryFrame.queueStream.Position;
@@ -677,7 +679,8 @@ namespace MLAPI.Messaging
             if (!m_ProcessUpdateStagesExternally)
             {
                 //Register with the network update loop system
-                this.RegisterAllNetworkUpdates();
+                _updateHandles = this.CreateUpdateHandles();
+                _updateHandles.RegisterAll();
             }
         }
 
@@ -717,7 +720,7 @@ namespace MLAPI.Messaging
             if (!m_ProcessUpdateStagesExternally)
             {
                 //Remove ourself from the network loop update system
-                this.UnregisterAllNetworkUpdates();
+                _updateHandles.UnregisterAll();
             }
 
             //Dispose of any readers and writers

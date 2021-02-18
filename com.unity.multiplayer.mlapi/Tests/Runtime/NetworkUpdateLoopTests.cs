@@ -23,10 +23,13 @@ namespace MLAPI.RuntimeTests
         {
             public NetworkUpdateCallbacks UpdateCallbacks;
 
+            private NetworkUpdateLoop.UpdateHandles _updateHandles;
+
             public void Initialize()
             {
-                this.RegisterNetworkUpdate(NetworkUpdateStage.EarlyUpdate);
-                this.RegisterNetworkUpdate(NetworkUpdateStage.PreLateUpdate);
+                _updateHandles = this.CreateUpdateHandles();
+                _updateHandles.Register(NetworkUpdateStage.EarlyUpdate);
+                _updateHandles.Register(NetworkUpdateStage.PreLateUpdate);
             }
 
             public void NetworkUpdate(NetworkUpdateStage updateStage)
@@ -59,7 +62,7 @@ namespace MLAPI.RuntimeTests
 
             public void Dispose()
             {
-                this.UnregisterAllNetworkUpdates();
+                _updateHandles.Dispose();
             }
         }
 
@@ -161,12 +164,14 @@ namespace MLAPI.RuntimeTests
         {
             public NetworkUpdateCallbacks UpdateCallbacks;
             public MonoBehaviourCallbacks BehaviourCallbacks;
+            private NetworkUpdateLoop.UpdateHandles _updateHandles;
 
             private void Awake()
             {
-                this.RegisterNetworkUpdate(NetworkUpdateStage.FixedUpdate);
-                this.RegisterNetworkUpdate(NetworkUpdateStage.PreUpdate);
-                this.RegisterNetworkUpdate(NetworkUpdateStage.PreLateUpdate);
+                _updateHandles = this.CreateUpdateHandles();
+                _updateHandles.Register(NetworkUpdateStage.FixedUpdate);
+                _updateHandles.Register(NetworkUpdateStage.PreUpdate);
+                _updateHandles.Register(NetworkUpdateStage.PreLateUpdate);
             }
 
             public void NetworkUpdate(NetworkUpdateStage updateStage)
@@ -202,7 +207,7 @@ namespace MLAPI.RuntimeTests
 
             private void OnDestroy()
             {
-                this.UnregisterAllNetworkUpdates();
+                _updateHandles.Dispose();
             }
         }
 
